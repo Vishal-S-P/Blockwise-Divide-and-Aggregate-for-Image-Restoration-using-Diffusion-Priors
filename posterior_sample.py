@@ -147,10 +147,6 @@ def save_mp4_video(gt, y, x0hat_traj, x0y_traj, xt_traj, output_path, fps=24, se
 
 
 def sample_in_batch(sampler, model, x_start, operator, y, evaluator, verbose, record, batch_size, gt, args, root, run_id):
-    """
-        posterior sampling in batch
-    """
-    
     samples = []
     trajs = []
     residuals_all_imgs = {}
@@ -160,24 +156,15 @@ def sample_in_batch(sampler, model, x_start, operator, y, evaluator, verbose, re
 
     for s in range(0, num_imgs, batch_size):
         print("[INFO] Image Number :", s)
-        if args.sampler.name == "consensus_admm" or args.sampler.name == "latent_consensus_admm" or args.sampler.name == "edm_dmd":
+        if args.sampler.name == "edm_dmd":
             cur_x_start = x_start[:, s:s + batch_size, ...] # [Num_particle, bsize, C, H, W]
         else:
-            # cur_x_start = x_start[s:s + batch_size]
             cur_x_start = x_start[s:s + batch_size,: , ...]
        
         cur_y = y[s:s + batch_size] #[bsize, C, H, W]
         cur_gt = gt[s: s + batch_size] #[bsize, C, H, W]
         
-        
-        if args.sampler.name == "consensus_admm":
-            cur_samples, _, _ = sampler.sample(model, cur_x_start, operator, cur_y, evaluator, verbose=verbose, record=record, gt=cur_gt)
-            # residuals_all_imgs[f"{s}.png"] = residuals
-            # # save x0ys as stacked tensor
-            # tensors_dir = safe_dir(root / 'tensors')
-            # torch.save(torch.cat([each_tensor.cpu() for each_tensor in x0y_s]), os.path.join(tensors_dir, f"{s}.pt"))
-        else:
-            cur_samples = sampler.sample(model=model, x_start=cur_x_start, operator=operator, measurement=cur_y, evaluator=evaluator, verbose=verbose, record=record, gt=cur_gt)
+        cur_samples = sampler.sample(model=model, x_start=cur_x_start, operator=operator, measurement=cur_y, evaluator=evaluator, verbose=verbose, record=record, gt=cur_gt)
         
         samples.append(cur_samples)
         
@@ -247,10 +234,6 @@ def sample_in_batch(sampler, model, x_start, operator, y, evaluator, verbose, re
     if record:
         trajs = Trajectory.merge(trajs)
         
-    # if args.sampler.name == "consensus_admm":
-    #     with open(os.path.join(root, "output_residuals.json"), "w") as f:
-    #         json.dump(residuals_all_imgs, f, indent=4) # indent for pretty-printing
-        
     return torch.cat(samples, dim=0), trajs
 
 
@@ -279,8 +262,7 @@ def main(args):
     # get sampler
     
     sampler = get_sampler(**args.sampler, 
-                          mcmc_sampler_config=task_group.mcmc_sampler_config,
-                          admm_consensus_config=task_group.consensus_admm_config)
+                          mcmc_sampler_config=task_group.mcmc_sampler_config,)
     
     # get model
     model = get_model(**args.model)
@@ -334,9 +316,6 @@ def main(args):
             full_samples.append(samples)
             full_trajs.append(trajs)
         full_samples = torch.stack(full_samples, dim=0)
-        # print("Full Samples Shape :", full_samples.shape)
-        # print("Images shape :", images.shape)
-        # print("y shape:", y.shape)
         
         # evaluate and log metrics
         results = evaluator.report(images, y, full_samples)    

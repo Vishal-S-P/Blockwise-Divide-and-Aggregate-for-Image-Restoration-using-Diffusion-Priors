@@ -1,4 +1,3 @@
-latent: False
 name: 'edm_dmd'
 num_particles: 4
 annealing_scheduler_config:

@@ -1,4 +1,3 @@
-latent: False
 name: 'edm_ddnm'
 annealing_scheduler_config:
   name: 'edm'

@@ -7,15 +7,6 @@ pixel:
     lr_min_ratio: 0.01
     mc_algo: langevin
     prior_solver: gaussian
-  
-  consensus_admm_config:
-    num_particles: 4
-    rho: 25.0 
-    lr: 1e-4
-    tau: 0.01
-    lr_min_ratio: 0.01
-    inner_iters: 5
-    admm_iters: 20 
 
   operator:
     name: down_sampling
@@ -39,38 +30,4 @@ pixel_hmc:
     resolution: 256
     scale_factor: 4
     sigma: 0.05
-
-# latent diffusion model
-ldm: 
-  mcmc_sampler_config: 
-    num_steps: 24
-    lr: 1.35e-4 
-    tau: 0.01
-    lr_min_ratio: 0.023
-    momentum: 0.86
-    mc_algo: hmc
-    prior_solver: gaussian
-
-  operator:
-    name: down_sampling
-    resolution: 256
-    scale_factor: 4
-    sigma: 0.05
-
-# stable diffusion
-sd: 
-  mcmc_sampler_config: 
-    num_steps: 30
-    lr: 1e-4
-    tau: 0.01
-    lr_min_ratio: 1
-    momentum: 0.45
-    mc_algo: hmc
-    prior_solver: gaussian
-
-  operator:
-    name: down_sampling
-    resolution: 256
-    scale_factor: 4
-    sigma: 0.01
 

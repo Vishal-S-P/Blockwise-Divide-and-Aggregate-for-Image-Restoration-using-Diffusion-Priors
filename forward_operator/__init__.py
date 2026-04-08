@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 from .resizer import Resizer
 import torch.nn.functional as F
-from .fastmri_utils import fft2c_new
-from .motionblur.motionblur import Kernel
 
 import torch
 import torch.nn as nn
@@ -290,137 +288,6 @@ class GaussianBlur(Operator):
         return self.conv(data)
 
 
-    
-@register_operator(name='motion_blur')
-class MotionBlur(Operator):
-    def __init__(self, kernel_size, intensity, device='cuda', sigma=0.05):
-        super().__init__(sigma)
-        self.device = device
-        self.kernel_size = kernel_size
-        self.conv = Blurkernel(blur_type='motion',
-                               kernel_size=kernel_size,
-                               std=intensity,
-                               device=device).to(device)  # should we keep this device term?
-
-        self.kernel = Kernel(size=(kernel_size, kernel_size), intensity=intensity)
-        kernel = torch.tensor(self.kernel.kernelMatrix, dtype=torch.float32)
-        self.conv.update_weights(kernel)
-        self.conv.requires_grad_(False)
-
-    def __call__(self, data):
-        # A^T * A
-        return self.conv(data)
-
-
-# Non-linear Operator
-@register_operator(name='phase_retrieval')
-class PhaseRetrieval(Operator):
-    def __init__(self, oversample=0.0, resolution=256, sigma=0.05):
-        super().__init__(sigma)
-        self.pad = int((oversample / 8.0) * resolution)
-
-    def __call__(self, x):
-        x = x * 0.5 + 0.5  # [-1, 1] -> [0, 1]
-        x = F.pad(x, (self.pad, self.pad, self.pad, self.pad))
-        if not torch.is_complex(x):
-            x = x.type(torch.complex64)
-        fft2_m = torch.view_as_complex(fft2c_new(torch.view_as_real(x)))
-        amplitude = fft2_m.abs()
-        # amplitude = (amplitude - amplitude.min()) / (amplitude.max() - amplitude.min())
-        return amplitude
-
-
-@register_operator(name='nonlinear_blur')
-class NonlinearBlur(Operator):
-    def __init__(self, opt_yml_path, device='cuda', sigma=0.05):
-        super().__init__(sigma)
-        self.device = device
-        self.blur_model = self.prepare_nonlinear_blur_model(opt_yml_path)
-        self.blur_model.requires_grad_(False)
-
-        np.random.seed(0)
-        kernel_np = np.random.randn(1, 512, 2, 2) * 1.2
-        random_kernel = (torch.from_numpy(kernel_np)).float().to(self.device)
-        self.random_kernel = random_kernel
-
-    def prepare_nonlinear_blur_model(self, opt_yml_path):
-        from .bkse.models.kernel_encoding.kernel_wizard import KernelWizard
-
-        with open(opt_yml_path, "r") as f:
-            opt = yaml.safe_load(f)["KernelWizard"]
-            model_path = opt["pretrained"]
-        blur_model = KernelWizard(opt)
-        blur_model.eval()
-        blur_model.load_state_dict(torch.load(model_path))
-        blur_model = blur_model.to(self.device)
-        self.random_kernel = torch.randn(1, 512, 2, 2).to(self.device) * 1.2
-        return blur_model
-
-    def call_old(self, data):
-        # random_kernel = torch.randn(1, 512, 2, 2).to(self.device) * 1.2
-        data = (data + 1.0) / 2.0  # [-1, 1] -> [0, 1]
-        blurred = []
-        for i in range(data.shape[0]):
-            single_blurred = self.blur_model.adaptKernel(data[i:i + 1], kernel=self.random_kernel)
-            blurred.append(single_blurred)
-        blurred = torch.cat(blurred, dim=0)
-        blurred = (blurred * 2.0 - 1.0).clamp(-1, 1)  # [0, 1] -> [-1, 1]
-        return blurred
-
-    def __call__(self, data):
-        data = (data + 1.0) / 2.0  # [-1, 1] -> [0, 1]
-
-        random_kernel = self.random_kernel.repeat(data.shape[0], 1, 1, 1)
-        blurred = self.blur_model.adaptKernel(data, kernel=random_kernel)
-        blurred = (blurred * 2.0 - 1.0).clamp(-1, 1)  # [0, 1] -> [-1, 1]
-
-        # blurred = []
-        # for i in range(data.shape[0]):
-        #     single_blurred = self.blur_model.adaptKernel(data[i:i + 1], kernel=self.random_kernel)
-        #     blurred.append(single_blurred)
-        # blurred = torch.cat(blurred, dim=0)
-        # blurred = (blurred * 2.0 - 1.0).clamp(-1, 1)  # [0, 1] -> [-1, 1]
-        return blurred
-
-
-@register_operator(name='high_dynamic_range')
-class HighDynamicRange(Operator):
-    def __init__(self, device='cuda', scale=2, sigma=0.05):
-        super().__init__(sigma)
-        self.device = device
-        self.scale = scale
-
-    def __call__(self, data):
-        return torch.clip((data * self.scale), -1, 1)
-
-
-class LatentWrapper(Operator):
-    def __init__(self, op, model):
-        super().__init__(sigma=op.sigma)
-        self.op = op
-        self.model = model
-
-    def __call__(self, x):
-        decoded = self.model.decode(x)
-        return self.op(decoded)
-
-
-    def loss(self, pred, observation):
-        decoded = self.model.decode(pred)
-        return self.op.loss(decoded.float(), observation)
-
-    def gradient(self, pred, observation, return_loss=False):
-        pred_tmp = pred.clone().detach().requires_grad_(True)
-        loss = self.loss(pred_tmp, observation).sum()
-        pred_grad = grad(loss, pred_tmp)[0]
-        pred_grad = pred_grad.to(pred.dtype)
-        # clip the gradient
-        pred_grad = torch.clamp(pred_grad, -1, 1)
-        if return_loss:
-            return pred_grad, loss
-        else:
-            return pred_grad
-        
 ############################################################## Operators with SVD support ##############################################################
 
 class A_functions:
@@ -492,8 +359,6 @@ class A_functions:
         
         factors = 1. / singulars
         factors[singulars == 0] = 0.
-        
-#         temp[:, :singulars.shape[0]] = temp[:, :singulars.shape[0]] / singulars
         temp[:, :singulars.shape[0]] = temp[:, :singulars.shape[0]] * factors
         return self.V(self.add_zeros(temp))
     
@@ -504,7 +369,6 @@ class A_functions:
         temp = self.Ut(vec)
         singulars = self.singulars()
         factors = singulars / (singulars*singulars+eta)
-#         print(temp.size(), factors.size(), singulars.size())
         temp[:, :singulars.shape[0]] = temp[:, :singulars.shape[0]] * factors
         return self.V(self.add_zeros(temp))
     
@@ -606,10 +470,7 @@ class SuperResolution(A_functions):
             lambda_t = lambda_t * (-change_index + 1.0) + change_index * (singulars * sigma_t * (1 - eta ** 2) ** 0.5 / a / sigma_y)
             
         lambda_t = lambda_t.reshape(1, 1, 1, -1)
-#         print("lambda_t:", lambda_t)
-#         print("V:", self.V_small)
-#         print(lambda_t.size(), self.V_small.size())
-#         print("Sigma_t:", torch.matmul(torch.matmul(self.V_small, torch.diag(lambda_t.reshape(-1))), self.Vt_small))
+
         patches = patches * lambda_t
         
         

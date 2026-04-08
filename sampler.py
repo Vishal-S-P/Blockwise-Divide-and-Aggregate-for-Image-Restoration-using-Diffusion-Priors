@@ -5,7 +5,6 @@ import torch.nn as nn
 from cores.trajectory import Trajectory, TrajectoryDMD
 from cores.scheduler import get_diffusion_scheduler, DiffusionPFODE, EDMScheduler
 from cores.mcmc import MCMCSampler
-from forward_operator import LatentWrapper
 from typing import Optional, Literal, Callable
 from PIL import Image
 from typing import Optional, Dict
@@ -13,8 +12,6 @@ import torch.optim as optim
 from torchvision import models
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-# import ot
-from clip.base_clip import CLIPEncoder
 import numpy as np
 from torch.optim import LBFGS
 import math
@@ -422,22 +419,15 @@ def plot_diff_heatmaps(
     plt.close()
 
 def get_sampler(**kwargs):
-    latent = kwargs['latent']
-    kwargs.pop('latent')
     sampler_name = kwargs.get('name')
     kwargs.pop('name')
-    if latent and sampler_name == 'edm_daps':
-        return LatentDAPS(**kwargs)
-    elif not latent and sampler_name == 'edm_daps':
-        kwargs.pop('admm_consensus_config', None)
+    if sampler_name == 'edm_daps':
         return DAPS(**kwargs)
-    elif sampler_name == 'edm_ddnm' and not latent:
-        kwargs.pop('mcmc_sampler_config', None)  # remove mcmc config if exists
-        kwargs.pop('admm_consensus_config', None)  # remove admm config if exists
+    elif sampler_name == 'edm_ddnm':
+        kwargs.pop('mcmc_sampler_config', None)  
         return DDNM(**kwargs)
-    elif sampler_name == 'edm_dmd' and not latent:
-        kwargs.pop('mcmc_sampler_config', None)  # remove mcmc config if exists
-        kwargs.pop('admm_consensus_config', None)  # remove admm config if exists
+    elif sampler_name == 'edm_dmd':
+        kwargs.pop('mcmc_sampler_config', None) 
         return DMD(**kwargs)
     else:   
         raise NotImplementedError(f"Sampler {sampler_name} with latent={latent} not implemented.")
@@ -1511,75 +1501,3 @@ class DAPS(nn.Module):
         
         
         return torch.stack([x_start_1, x_start_2, x_start_3, x_start_4])
-
-class LatentDAPS(DAPS):
-    """
-    Latent Decoupled Annealing Posterior Sampling (LatentDAPS).
-
-    Implements posterior sampling using a latent diffusion model combined with MCMC updates
-    """
-    def sample(self, model, z_start, operator, measurement, evaluator=None, record=False, verbose=False, **kwargs):
-        """
-        Performs sampling using LatentDAPS in latent space, decoding intermediate results.
-
-        Args:
-            model (LatentDiffusionModel): Latent diffusion model.
-            z_start (torch.Tensor): Initial latent state tensor.
-            operator (nn.Module): Measurement operator applied in data space.
-            measurement (torch.Tensor): Observed measurement tensor.
-            evaluator (Evaluator, optional): Evaluator for monitoring performance.
-            record (bool, optional): Whether to record intermediate states and metrics.
-            verbose (bool, optional): Enables progress bar and evaluation metrics.
-            **kwargs:
-                gt (torch.Tensor, optional): Ground truth data for evaluation.
-
-        Returns:
-            torch.Tensor: Final sampled data decoded from latent space.
-        """
-        if record:
-            self.trajectory = Trajectory()
-        pbar = tqdm.trange(self.annealing_scheduler.num_steps - 1) if verbose else range(self.annealing_scheduler.num_steps - 1)
-        warpped_operator = LatentWrapper(operator, model)
-
-        zt = z_start
-        for step in pbar:
-            sigma = self.annealing_scheduler.sigma_steps[step]
-            # 1. reverse diffusion
-            with torch.no_grad():
-                diffusion_scheduler = get_diffusion_scheduler(**self.diffusion_scheduler_config, sigma_max=sigma)
-                sampler = DiffusionPFODE(model, diffusion_scheduler, solver='euler')
-                z0hat = sampler.sample(zt)
-                x0hat = model.decode(z0hat)
-
-            # 2. MCMC update
-            z0y = self.mcmc_sampler.sample(zt, model, z0hat, warpped_operator, measurement, sigma, step / self.annealing_scheduler.num_steps)
-            with torch.no_grad():
-                x0y = model.decode(z0y)
-
-            # 3. forward diffusion
-            if step != self.annealing_scheduler.num_steps - 1:
-                zt = z0y + torch.randn_like(z0y) * self.annealing_scheduler.sigma_steps[step + 1]
-            else:
-                zt = z0y
-            with torch.no_grad():
-                xt = model.decode(zt)
-
-            # 4. evaluation
-            x0hat_results = x0y_results = {}
-            if evaluator and 'gt' in kwargs:
-                with torch.no_grad():
-                    gt = kwargs['gt']
-                    x0hat_results = evaluator(gt, measurement, x0hat)
-                    x0y_results = evaluator(gt, measurement, x0y)
-
-                # record
-                if verbose:
-                    main_eval_fn_name = evaluator.main_eval_fn_name
-                    pbar.set_postfix({
-                        'x0hat' + '_' + main_eval_fn_name: f"{x0hat_results[main_eval_fn_name].item():.2f}",
-                        'x0y' + '_' + main_eval_fn_name: f"{x0y_results[main_eval_fn_name].item():.2f}",
-                    })
-            if record:
-                self._record(xt, x0y, x0hat, sigma, x0hat_results, x0y_results)
-        return xt
-
