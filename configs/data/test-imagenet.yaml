@@ -1,0 +1,5 @@
+name: image
+root: '/depot/qqiu/data/vishal/decomp_imaging/00_datasets/imagenet'
+resolution: 256
+start_id: 0
+end_id: 100

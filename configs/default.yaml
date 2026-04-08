@@ -1,0 +1,19 @@
+gpu: 0
+batch_size: 10
+num_runs: 1
+save_dir: ./results
+name: demo
+wandb: False
+save_samples: True
+eval_only : False
+eval_img_pth : /depot/qqiu/data/vishal/decomp_imaging/DAPS/results_block_kaczmarz/down_sampling/samples
+save_traj: True
+save_traj_video: False
+save_traj_raw_data: False
+show_eval: False
+eval_fid: False
+eval_fn_list: ['psnr', 'ssim', 'lpips']
+task_group: pixel  # pixel, sd, or ldm
+project_name: 'DAPS'
+num_images: 100
+seed: 42
