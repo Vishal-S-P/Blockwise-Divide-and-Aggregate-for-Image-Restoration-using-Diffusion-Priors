@@ -1,47 +1,34 @@
-python posterior_sample.py \
-+data=demo-ffhq \
-+model=ffhq256ddpm \
-+task=down_sampling \
-+sampler=edm_multi_block_kaczmarz \
-task_group=pixel \
-save_dir=results_block_kaczmarz \
-num_runs=1 \
-sampler.diffusion_scheduler_config.num_steps=5 \
-sampler.diffusion_scheduler_config.num_denoising_steps=200 \
-task.pixel.operator.sigma=0.01 \
-batch_size=1 \
-data.start_id=0 data.end_id=10 \
-name=down_sampling_demo \
-gpu=0
+## 📌 Overview
+We present a **multi-trajectory diffusion-based sampler** for solving ill-posed image restoration problems. Our method leverages the diversity of diffusion trajectories initialized from independent noise samples and introduces a **patchwise divide-and-aggregate strategy** to enhance structural exploration and reconstruction fidelity.
 
-## SR
-python posterior_sample.py \
-+data=test-ffhq \
-+model=ffhq256ddpm \
-+task=down_sampling \
-+sampler=edm_multi_block_kaczmarz \
-task_group=pixel \
-save_dir=results_multi_block_kaczmarz \
-num_runs=1 \
-eval_only=False \
-sampler.diffusion_scheduler_config.num_steps=5 \
-sampler.diffusion_scheduler_config.num_denoising_steps=200 \
-batch_size=1 \
-name=down_sampling \
-gpu=0
+The core idea is to:
+- Sample multiple reconstructions from a diffusion prior
+- Introduce **structured diversity** via patchwise permutations/rotations
+- Aggregate local reconstructions into a **globally consistent solution**
 
-# inpainting box
-python posterior_sample.py \
-+data=test-ffhq \
-+model=ffhq256ddpm \
-+task=inpainting \
-+sampler=edm_multi_block_kaczmarz \
-task_group=pixel \
-save_dir=results_block_kaczmarz \
-num_runs=1 \
-eval_only=False \
-sampler.diffusion_scheduler_config.num_steps=5 \
-sampler.diffusion_scheduler_config.num_denoising_steps=200 \
-batch_size=1 \
-name=inpainting_box \
-gpu=0
+## 🧠 Motivation
+
+Inverse problems y = Ax + Gaussian(0, sigma_y) (e.g., inpainting, super-resolution, deblurring) are inherently ill-posed:
+
+
+
+
+
+- Multiple valid solutions \(x\) exist for a given observation \(y\)
+- Diffusion models implicitly define a **posterior distribution**
+- Standard samplers explore only **limited modes**
+
+👉 Our method explicitly **explores and aggregates multiple possible reconstructions**
+
+## 📂 Repository Structure
+
+```bash
+.
+├── configs/              # Experiment configurations
+├── models/               # Diffusion model definitions
+├── samplers/             # Sampling algorithms
+├── operators/            # Forward models (inpainting, SR, etc.)
+├── utils/                # Utility functions
+├── scripts/              # Training / evaluation scripts
+├── outputs/              # Generated results (ignored by git)
+└── README.md
